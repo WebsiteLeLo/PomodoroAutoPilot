@@ -1,0 +1,877 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FocusFlow — Pomodoro Timer</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Mono:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0d0d0f;
+    --surface: #141416;
+    --surface2: #1c1c1f;
+    --border: #2a2a2e;
+    --focus-color: #e8c547;
+    --break-color: #5ce8b0;
+    --text: #f0ede8;
+    --muted: #6b6878;
+    --ring-size: 280px;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'DM Mono', monospace;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    position: relative;
+  }
+
+  /* Background grain + glow */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background:
+      radial-gradient(ellipse 60% 50% at 50% 50%, rgba(232,197,71,0.06) 0%, transparent 70%);
+    pointer-events: none;
+    transition: background 1s ease;
+    z-index: 0;
+  }
+
+  body.break-mode::before {
+    background:
+      radial-gradient(ellipse 60% 50% at 50% 50%, rgba(92,232,176,0.07) 0%, transparent 70%);
+  }
+
+  body::after {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.04'/%3E%3C/svg%3E");
+    pointer-events: none;
+    z-index: 0;
+    opacity: 0.4;
+  }
+
+  .container {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 40px;
+  }
+
+  /* Header */
+  header {
+    text-align: center;
+  }
+
+  .brand {
+    font-family: 'DM Serif Display', serif;
+    font-size: 13px;
+    letter-spacing: 0.35em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 6px;
+  }
+
+  .mode-label {
+    font-family: 'DM Serif Display', serif;
+    font-size: 28px;
+    color: var(--focus-color);
+    transition: color 0.8s ease;
+    font-style: italic;
+  }
+
+  body.break-mode .mode-label { color: var(--break-color); }
+
+  /* SVG Ring Timer */
+  .ring-wrapper {
+    position: relative;
+    width: var(--ring-size);
+    height: var(--ring-size);
+  }
+
+  .ring-svg {
+    transform: rotate(-90deg);
+    width: 100%;
+    height: 100%;
+  }
+
+  .ring-bg {
+    fill: none;
+    stroke: var(--border);
+    stroke-width: 6;
+  }
+
+  .ring-progress {
+    fill: none;
+    stroke: var(--focus-color);
+    stroke-width: 6;
+    stroke-linecap: round;
+    transition: stroke-dashoffset 1s linear, stroke 0.8s ease;
+    filter: drop-shadow(0 0 8px var(--focus-color));
+  }
+
+  body.break-mode .ring-progress {
+    stroke: var(--break-color);
+    filter: drop-shadow(0 0 8px var(--break-color));
+  }
+
+  /* Timer display inside ring */
+  .ring-center {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+  }
+
+  .time-display {
+    font-family: 'DM Serif Display', serif;
+    font-size: 64px;
+    font-style: italic;
+    letter-spacing: -2px;
+    color: var(--text);
+    line-height: 1;
+  }
+
+  .session-tag {
+    font-size: 10px;
+    letter-spacing: 0.25em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+
+  /* Pulse dot in center */
+  .pulse-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--focus-color);
+    margin-top: 4px;
+    transition: background 0.8s;
+  }
+
+  body.break-mode .pulse-dot { background: var(--break-color); }
+
+  .pulse-dot.active {
+    animation: pulse 2s infinite;
+  }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.4; transform: scale(0.6); }
+  }
+
+  /* Controls */
+  .controls {
+    display: flex;
+    gap: 14px;
+    align-items: center;
+  }
+
+  .btn {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    cursor: pointer;
+    font-family: 'DM Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    padding: 12px 24px;
+    border-radius: 2px;
+    transition: all 0.2s ease;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .btn::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: var(--focus-color);
+    opacity: 0;
+    transition: opacity 0.2s;
+  }
+
+  body.break-mode .btn::after { background: var(--break-color); }
+
+  .btn:hover::after { opacity: 0.08; }
+
+  .btn-primary {
+    background: var(--focus-color);
+    color: #0d0d0f;
+    border-color: var(--focus-color);
+    font-weight: 500;
+    min-width: 100px;
+    transition: all 0.2s ease, background 0.8s, border-color 0.8s;
+  }
+
+  body.break-mode .btn-primary {
+    background: var(--break-color);
+    border-color: var(--break-color);
+  }
+
+  .btn-primary:hover { opacity: 0.88; }
+
+  /* Session count */
+  .sessions-row {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+  }
+
+  .session-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    border: 1.5px solid var(--muted);
+    transition: all 0.4s ease;
+  }
+
+  .session-dot.done {
+    background: var(--focus-color);
+    border-color: var(--focus-color);
+    box-shadow: 0 0 6px var(--focus-color);
+  }
+
+  body.break-mode .session-dot.done {
+    background: var(--break-color);
+    border-color: var(--break-color);
+    box-shadow: 0 0 6px var(--break-color);
+  }
+
+  .sessions-label {
+    font-size: 11px;
+    letter-spacing: 0.15em;
+    color: var(--muted);
+    text-transform: uppercase;
+    margin-right: 8px;
+  }
+
+  /* Stats row */
+  .stats {
+    display: flex;
+    gap: 40px;
+    border-top: 1px solid var(--border);
+    padding-top: 24px;
+  }
+
+  .stat {
+    text-align: center;
+  }
+
+  .stat-value {
+    font-family: 'DM Serif Display', serif;
+    font-size: 28px;
+    font-style: italic;
+    color: var(--text);
+  }
+
+  .stat-label {
+    font-size: 10px;
+    letter-spacing: 0.2em;
+    color: var(--muted);
+    text-transform: uppercase;
+    margin-top: 2px;
+  }
+
+  /* Notification toast */
+  .toast {
+    position: fixed;
+    top: 32px;
+    left: 50%;
+    transform: translateX(-50%) translateY(-20px);
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--focus-color);
+    color: var(--text);
+    padding: 14px 24px;
+    border-radius: 2px;
+    font-size: 13px;
+    letter-spacing: 0.05em;
+    opacity: 0;
+    pointer-events: none;
+    transition: all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+    z-index: 100;
+    white-space: nowrap;
+  }
+
+  .toast.show {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+
+  body.break-mode .toast { border-left-color: var(--break-color); }
+
+  /* Tick marks around ring */
+  .ticks {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+  }
+
+  /* Skip break button */
+  .skip-btn {
+    font-size: 10px;
+    color: var(--muted);
+    background: none;
+    border: none;
+    cursor: pointer;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    font-family: 'DM Mono', monospace;
+    text-decoration: underline;
+    text-underline-offset: 3px;
+    display: none;
+  }
+
+  .skip-btn:hover { color: var(--text); }
+
+  body.break-mode .skip-btn { display: block; }
+
+  /* Notification permission banner */
+  .notif-banner {
+    position: fixed;
+    bottom: 28px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-left: 3px solid #e8c547;
+    padding: 14px 20px;
+    border-radius: 2px;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    z-index: 200;
+    font-size: 12px;
+    letter-spacing: 0.05em;
+    color: var(--muted);
+    white-space: nowrap;
+    animation: slideUp 0.4s cubic-bezier(0.34,1.56,0.64,1) forwards;
+  }
+
+  @keyframes slideUp {
+    from { opacity: 0; transform: translateX(-50%) translateY(20px); }
+    to   { opacity: 1; transform: translateX(-50%) translateY(0); }
+  }
+
+  .notif-banner.hidden { display: none; }
+
+  .notif-banner strong { color: var(--text); }
+
+  .notif-allow-btn {
+    background: var(--focus-color);
+    color: #0d0d0f;
+    border: none;
+    padding: 7px 16px;
+    font-family: 'DM Mono', monospace;
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    border-radius: 2px;
+    cursor: pointer;
+  }
+
+  .notif-allow-btn:hover { opacity: 0.85; }
+
+  .notif-dismiss {
+    background: none;
+    border: none;
+    color: var(--muted);
+    cursor: pointer;
+    font-size: 16px;
+    line-height: 1;
+    padding: 2px 4px;
+  }
+
+  /* Permission status pill */
+  .notif-status {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 10px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--muted);
+    z-index: 10;
+    cursor: pointer;
+    padding: 6px 10px;
+    border: 1px solid var(--border);
+    border-radius: 100px;
+    background: var(--surface2);
+    transition: all 0.2s;
+  }
+
+  .notif-status:hover { border-color: var(--muted); }
+
+  .notif-status-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--muted);
+  }
+
+  .notif-status.granted .notif-status-dot { background: #5ce8b0; }
+  .notif-status.denied .notif-status-dot  { background: #e85c5c; }
+  .notif-status.granted { color: #5ce8b0; border-color: rgba(92,232,176,0.2); }
+  .notif-status.denied  { color: #e85c5c; border-color: rgba(232,92,92,0.2); }
+
+  @keyframes flash {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
+  }
+
+  .flash-ring .ring-progress { animation: flash 0.5s 4; }
+</style>
+</head>
+<body>
+
+<div class="container">
+
+  <header>
+    <div class="brand">FocusFlow</div>
+    <div class="mode-label" id="modeLabel">Focus Session</div>
+  </header>
+
+  <div class="ring-wrapper">
+    <svg class="ring-svg" viewBox="0 0 300 300" id="ringSvg">
+      <!-- Tick marks -->
+      <g id="tickMarks"></g>
+      <!-- Background ring -->
+      <circle class="ring-bg" cx="150" cy="150" r="130"/>
+      <!-- Progress ring -->
+      <circle class="ring-progress" id="ringProgress" cx="150" cy="150" r="130"/>
+    </svg>
+
+    <div class="ring-center">
+      <div class="time-display" id="timeDisplay">25:00</div>
+      <div class="session-tag" id="sessionTag">Session 1 of 4</div>
+      <div class="pulse-dot" id="pulseDot"></div>
+    </div>
+  </div>
+
+  <div class="controls">
+    <button class="btn" id="resetBtn" onclick="resetTimer()">Reset</button>
+    <button class="btn btn-primary" id="startBtn" onclick="toggleTimer()">Start</button>
+    <button class="btn" onclick="skipSession()">Skip</button>
+  </div>
+
+  <div class="sessions-row">
+    <span class="sessions-label">Pomodoros</span>
+    <div class="session-dot" id="dot0"></div>
+    <div class="session-dot" id="dot1"></div>
+    <div class="session-dot" id="dot2"></div>
+    <div class="session-dot" id="dot3"></div>
+  </div>
+
+  <button class="skip-btn" id="skipBreakBtn" onclick="skipBreak()">↩ Skip break</button>
+
+  <div class="stats">
+    <div class="stat">
+      <div class="stat-value" id="statFocus">0</div>
+      <div class="stat-label">Sessions Done</div>
+    </div>
+    <div class="stat">
+      <div class="stat-value" id="statTime">0m</div>
+      <div class="stat-label">Focus Time</div>
+    </div>
+    <div class="stat">
+      <div class="stat-value" id="statBreaks">0</div>
+      <div class="stat-label">Breaks Taken</div>
+    </div>
+  </div>
+
+</div>
+
+<div class="toast" id="toast"></div>
+
+<!-- Notification permission status (top-right) -->
+<div class="notif-status" id="notifStatus" onclick="handleNotifStatusClick()" title="Click to enable notifications">
+  <div class="notif-status-dot"></div>
+  <span id="notifStatusText">Notifications off</span>
+</div>
+
+<!-- Permission banner (bottom) -->
+<div class="notif-banner" id="notifBanner">
+  <span>🔔 <strong>Allow notifications</strong> for break &amp; focus alerts on Windows</span>
+  <button class="notif-allow-btn" onclick="requestNotifPermission()">Enable</button>
+  <button class="notif-dismiss" onclick="dismissBanner()" title="Dismiss">×</button>
+</div>
+
+<script>
+  // ── Config ──────────────────────────────────────────────────
+  const FOCUS_MINUTES = 25;
+  const BREAK_MINUTES = 5;
+  const SESSIONS_BEFORE_LONG = 4;
+
+  // ── State ───────────────────────────────────────────────────
+  let isRunning = false;
+  let isBreak = false;
+  let secondsLeft = FOCUS_MINUTES * 60;
+  let totalSeconds = FOCUS_MINUTES * 60;
+  let currentSession = 0;       // 0-indexed (0–3)
+  let completedSessions = 0;
+  let totalFocusMinutes = 0;
+  let totalBreaks = 0;
+  let intervalId = null;
+  let audioCtx = null;
+
+  // ── SVG Ring setup ──────────────────────────────────────────
+  const radius = 130;
+  const circumference = 2 * Math.PI * radius;
+  const ringProgress = document.getElementById('ringProgress');
+  ringProgress.style.strokeDasharray = circumference;
+  ringProgress.style.strokeDashoffset = 0;
+
+  // Draw subtle tick marks
+  const tickGroup = document.getElementById('tickMarks');
+  for (let i = 0; i < 60; i++) {
+    const angle = (i / 60) * 2 * Math.PI - Math.PI / 2;
+    const isMajor = i % 5 === 0;
+    const innerR = isMajor ? 118 : 121;
+    const outerR = 127;
+    const x1 = 150 + innerR * Math.cos(angle);
+    const y1 = 150 + innerR * Math.sin(angle);
+    const x2 = 150 + outerR * Math.cos(angle);
+    const y2 = 150 + outerR * Math.sin(angle);
+    const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    line.setAttribute('x1', x1); line.setAttribute('y1', y1);
+    line.setAttribute('x2', x2); line.setAttribute('y2', y2);
+    line.setAttribute('stroke', isMajor ? '#3a3a3e' : '#252528');
+    line.setAttribute('stroke-width', isMajor ? '2' : '1');
+    tickGroup.appendChild(line);
+  }
+
+  // ── Web Audio helpers ────────────────────────────────────────
+  function getAudioCtx() {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    return audioCtx;
+  }
+
+  function playTone(frequency, duration, type = 'sine', volume = 0.5, delay = 0) {
+    try {
+      const ctx = getAudioCtx();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.type = type;
+      osc.frequency.setValueAtTime(frequency, ctx.currentTime + delay);
+      gain.gain.setValueAtTime(0, ctx.currentTime + delay);
+      gain.gain.linearRampToValueAtTime(volume, ctx.currentTime + delay + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + delay + duration);
+      osc.start(ctx.currentTime + delay);
+      osc.stop(ctx.currentTime + delay + duration + 0.05);
+    } catch(e) {}
+  }
+
+  function playBreakSound() {
+    // Gentle ascending chime
+    playTone(523.25, 0.5, 'sine', 0.35, 0.0);
+    playTone(659.25, 0.5, 'sine', 0.35, 0.18);
+    playTone(783.99, 0.6, 'sine', 0.35, 0.36);
+    playTone(1046.50, 0.8, 'sine', 0.3, 0.55);
+  }
+
+  function playFocusSound() {
+    // Warm descending bell — "back to work"
+    playTone(880, 0.4, 'sine', 0.3, 0.0);
+    playTone(659.25, 0.4, 'sine', 0.3, 0.22);
+    playTone(523.25, 0.7, 'sine', 0.3, 0.44);
+  }
+
+  function playTickSound() {
+    playTone(1200, 0.04, 'square', 0.04);
+  }
+
+  // ── Notifications (Windows-compatible) ───────────────────────
+  function updateNotifStatusUI() {
+    const pill = document.getElementById('notifStatus');
+    const label = document.getElementById('notifStatusText');
+    const banner = document.getElementById('notifBanner');
+    const perm = Notification.permission;
+    pill.className = 'notif-status ' + perm;
+    if (perm === 'granted') {
+      label.textContent = 'Notifications on';
+      banner.classList.add('hidden');
+    } else if (perm === 'denied') {
+      label.textContent = 'Notifications blocked';
+      banner.classList.add('hidden');
+    } else {
+      label.textContent = 'Notifications off';
+    }
+  }
+
+  function requestNotifPermission() {
+    if (!('Notification' in window)) {
+      showToast('⚠  This browser does not support notifications');
+      return;
+    }
+    Notification.requestPermission().then(perm => {
+      updateNotifStatusUI();
+      if (perm === 'granted') {
+        showToast('✦  Windows notifications enabled!');
+        // Send a test notification so the user sees it works
+        sendNotification('✅ FocusFlow Ready', 'You\'ll get notified at every break and focus session.');
+      } else if (perm === 'denied') {
+        showToast('⚠  Notifications blocked — enable in browser settings');
+      }
+    });
+  }
+
+  function handleNotifStatusClick() {
+    if (Notification.permission === 'granted') {
+      showToast('✦  Notifications are already enabled');
+    } else if (Notification.permission === 'denied') {
+      showToast('⚠  Unblock notifications in your browser/Windows settings → Site Settings');
+    } else {
+      requestNotifPermission();
+    }
+  }
+
+  function dismissBanner() {
+    document.getElementById('notifBanner').classList.add('hidden');
+  }
+
+  function sendNotification(title, body) {
+    if (!('Notification' in window)) return;
+    if (Notification.permission !== 'granted') return;
+    try {
+      // Use ServiceWorker registration if available (more reliable on Windows for background tabs)
+      if (navigator.serviceWorker && navigator.serviceWorker.controller) {
+        navigator.serviceWorker.ready.then(reg => {
+          reg.showNotification(title, {
+            body,
+            icon: 'https://emojicdn.elk.sh/🍅',
+            badge: 'https://emojicdn.elk.sh/🍅',
+            requireInteraction: false,
+            silent: false
+          });
+        }).catch(() => fallbackNotification(title, body));
+      } else {
+        fallbackNotification(title, body);
+      }
+    } catch(e) {
+      fallbackNotification(title, body);
+    }
+  }
+
+  function fallbackNotification(title, body) {
+    try {
+      const n = new Notification(title, {
+        body,
+        icon: 'https://emojicdn.elk.sh/🍅',
+        requireInteraction: false,
+        silent: false
+      });
+      // Auto-close after 6 seconds
+      setTimeout(() => n.close(), 6000);
+    } catch(e) {
+      console.warn('Notification failed:', e);
+    }
+  }
+
+  // ── Init notifications on load ────────────────────────────────
+  if (!('Notification' in window)) {
+    document.getElementById('notifBanner').classList.add('hidden');
+    document.getElementById('notifStatus').style.display = 'none';
+  } else {
+    updateNotifStatusUI();
+    // Hide banner if already decided
+    if (Notification.permission !== 'default') {
+      document.getElementById('notifBanner').classList.add('hidden');
+    }
+  }
+
+  // ── Toast ────────────────────────────────────────────────────
+  let toastTimer = null;
+  function showToast(msg) {
+    const t = document.getElementById('toast');
+    t.textContent = msg;
+    t.classList.add('show');
+    if (toastTimer) clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => t.classList.remove('show'), 4000);
+  }
+
+  // ── Ring update ──────────────────────────────────────────────
+  function updateRing() {
+    const fraction = secondsLeft / totalSeconds;
+    const offset = circumference * (1 - fraction);
+    ringProgress.style.strokeDashoffset = offset;
+  }
+
+  // ── Time display ─────────────────────────────────────────────
+  function formatTime(s) {
+    const m = Math.floor(s / 60).toString().padStart(2, '0');
+    const sec = (s % 60).toString().padStart(2, '0');
+    return `${m}:${sec}`;
+  }
+
+  function updateDisplay() {
+    document.getElementById('timeDisplay').textContent = formatTime(secondsLeft);
+    updateRing();
+    document.getElementById('sessionTag').textContent =
+      isBreak ? 'Break Time' : `Session ${currentSession + 1} of ${SESSIONS_BEFORE_LONG}`;
+  }
+
+  // ── Session dots ─────────────────────────────────────────────
+  function updateDots() {
+    for (let i = 0; i < 4; i++) {
+      const dot = document.getElementById(`dot${i}`);
+      dot.classList.toggle('done', i < completedSessions % 4 || (completedSessions > 0 && completedSessions % 4 === 0));
+    }
+    // Proper logic: fill dots for completed sessions in current cycle
+    const inCycle = completedSessions % 4;
+    for (let i = 0; i < 4; i++) {
+      document.getElementById(`dot${i}`).classList.toggle('done', i < inCycle);
+    }
+  }
+
+  // ── Stats ─────────────────────────────────────────────────────
+  function updateStats() {
+    document.getElementById('statFocus').textContent = completedSessions;
+    document.getElementById('statTime').textContent = totalFocusMinutes + 'm';
+    document.getElementById('statBreaks').textContent = totalBreaks;
+  }
+
+  // ── Mode switch ───────────────────────────────────────────────
+  function switchToBreak() {
+    isBreak = true;
+    secondsLeft = BREAK_MINUTES * 60;
+    totalSeconds = BREAK_MINUTES * 60;
+    document.body.classList.add('break-mode');
+    document.getElementById('modeLabel').textContent = 'Break Time';
+    document.getElementById('startBtn').textContent = 'Pause';
+    playBreakSound();
+    sendNotification('🍃 Break Time!', `Take a ${BREAK_MINUTES}-minute rest. You earned it!`);
+    showToast('✦  Break started — step away & breathe');
+    totalBreaks++;
+    updateStats();
+    updateDisplay();
+  }
+
+  function switchToFocus() {
+    isBreak = false;
+    secondsLeft = FOCUS_MINUTES * 60;
+    totalSeconds = FOCUS_MINUTES * 60;
+    document.body.classList.remove('break-mode');
+    document.getElementById('modeLabel').textContent = 'Focus Session';
+    document.getElementById('startBtn').textContent = 'Pause';
+    playFocusSound();
+    sendNotification('🔥 Focus Time!', 'Break over. Time to get back to work!');
+    showToast('✦  Break over — back to focus!');
+    updateDisplay();
+  }
+
+  // ── Tick ─────────────────────────────────────────────────────
+  function tick() {
+    if (secondsLeft <= 0) {
+      if (!isBreak) {
+        // Focus session complete
+        completedSessions++;
+        totalFocusMinutes += FOCUS_MINUTES;
+        currentSession = completedSessions % 4;
+        updateDots();
+        updateStats();
+        switchToBreak();
+      } else {
+        // Break complete → start next focus
+        switchToFocus();
+      }
+      return;
+    }
+    secondsLeft--;
+    if (secondsLeft % 60 === 0 && secondsLeft > 0) playTickSound();
+    updateDisplay();
+  }
+
+  // ── Timer controls ────────────────────────────────────────────
+  function toggleTimer() {
+    if (isRunning) {
+      pauseTimer();
+    } else {
+      startTimer();
+    }
+  }
+
+  function startTimer() {
+    isRunning = true;
+    document.getElementById('startBtn').textContent = 'Pause';
+    document.getElementById('pulseDot').classList.add('active');
+    intervalId = setInterval(tick, 1000);
+    if (!isBreak) showToast('✦  Focus session started — stay in the zone');
+  }
+
+  function pauseTimer() {
+    isRunning = false;
+    document.getElementById('startBtn').textContent = 'Resume';
+    document.getElementById('pulseDot').classList.remove('active');
+    clearInterval(intervalId);
+    showToast('⏸  Paused');
+  }
+
+  function resetTimer() {
+    clearInterval(intervalId);
+    isRunning = false;
+    isBreak = false;
+    secondsLeft = FOCUS_MINUTES * 60;
+    totalSeconds = FOCUS_MINUTES * 60;
+    document.body.classList.remove('break-mode');
+    document.getElementById('modeLabel').textContent = 'Focus Session';
+    document.getElementById('startBtn').textContent = 'Start';
+    document.getElementById('pulseDot').classList.remove('active');
+    updateDisplay();
+    showToast('↺  Timer reset');
+  }
+
+  function skipSession() {
+    clearInterval(intervalId);
+    if (isRunning) {
+      if (!isBreak) {
+        completedSessions++;
+        totalFocusMinutes += Math.round((FOCUS_MINUTES * 60 - secondsLeft) / 60);
+        currentSession = completedSessions % 4;
+        updateDots();
+        updateStats();
+        switchToBreak();
+        startTimer();
+      } else {
+        switchToFocus();
+        startTimer();
+      }
+    }
+  }
+
+  function skipBreak() {
+    if (isBreak) {
+      clearInterval(intervalId);
+      switchToFocus();
+      if (isRunning) startTimer();
+    }
+  }
+
+  // ── Init ──────────────────────────────────────────────────────
+  updateDisplay();
+  updateDots();
+  updateStats();
+</script>
+</body>
+</html>
